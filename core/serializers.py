@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Device
+from .models import Device, Measurement
 
 class DeviceRegistrationSerializer(serializers.ModelSerializer):
     class Meta:
@@ -20,4 +20,18 @@ class DeviceRegistrationSerializer(serializers.ModelSerializer):
             if key not in value:
                 raise serializers.ValidationError(f"O campo '{key}' está faltando no manifesto.")
                 
+        return value
+
+class MeasurementSerializer(serializers.ModelSerializer):
+    # Usamos o 'name' para identificar o hardware no JSON enviado
+    name = serializers.CharField(write_only=True)
+
+    class Meta:
+        model = Measurement
+        fields = ['name', 'data'] # 'data' receberá o payload com as leituras dos sensores
+
+    def validate_name(self, value):
+        # Validação Crítica: verifica se o hardware_id (name) existe no sistema
+        if not Device.objects.filter(name=value).exists():
+            raise serializers.ValidationError("Dispositivo não encontrado ou não registrado.")
         return value
