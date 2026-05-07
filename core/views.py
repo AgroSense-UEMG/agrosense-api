@@ -3,8 +3,14 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, generics
 from rest_framework.permissions import IsAuthenticated
-from .models import Device, Measurement
-from .serializers import DeviceRegistrationSerializer, MeasurementSerializer
+from rest_framework.viewsets import ModelViewSet
+from .models import Device, Measurement, Project
+from .serializers import (
+    DeviceRegistrationSerializer, 
+    MeasurementSerializer,
+    ProjectSerializer, 
+    DeviceSerializer
+)
 
 class DeviceRegistrationView(APIView):
     # Garante que apenas usuários com Token válido tenham acesso
@@ -32,6 +38,7 @@ class DeviceRegistrationView(APIView):
 class TelemetryIngestionView(generics.CreateAPIView):
     queryset = Measurement.objects.all()
     serializer_class = MeasurementSerializer
+    permission_classes = [IsAuthenticated]
 
     def create(self, request, *args, **kwargs):
         # O Serializer limpa e valida os dados brutos da requisição
@@ -45,7 +52,7 @@ class TelemetryIngestionView(generics.CreateAPIView):
             device_name = validated_data.pop('name') # O .pop() remove o 'name' da lista
             
             # Busca o objeto Device real no banco para fazer o vínculo (FK)
-            device = Device.objects.filter(name=device_name).first()
+            device = Device.objects.filter(name=device_name, user=request.user).first()
             
             if not device:
                 return Response({"error": "Dispositivo não encontrado."}, status=status.HTTP_404_NOT_FOUND)
@@ -58,3 +65,23 @@ class TelemetryIngestionView(generics.CreateAPIView):
             )
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class ProjectViewSet(ModelViewSet):
+    serializer_class = ProjectSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return Project.objects.filter(user=self.request.user).order_by("-created_at")
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+
+
+class DeviceViewSet(ModelViewSet):
+    serializer_class = DeviceSerializer
+    permission_classes = [IsAuthenticated]
+
+    http_method_names = ["get", "patch", "head", "options"]
+
+    def get_queryset(self):
+        return Device.objects.filter(user=self.request.user).order_by("-created_at")
