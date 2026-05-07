@@ -62,6 +62,7 @@ class Device(TimeStampedModel):
     class Meta:
         verbose_name = "Dispositivo"
         verbose_name_plural = "Dispositivos"
+        unique_together = ['user', 'name']  
 
     def __str__(self):
         return self.name
