@@ -52,7 +52,7 @@ class Device(TimeStampedModel):
     Classe que representa o dispostivo físico
     O 'manifest' guarda quais sensores um dispositivo específico possui
     '''
-    name = models.CharField(max_length=255, verbose_name="Nome do Dispositivo")
+    name = models.CharField(max_length=255, unique=True, verbose_name="Nome do Dispositivo")
     # Esse campo guarda o JSON com as configurações do hardware
     manifest = models.JSONField(default=dict, verbose_name="Configuração (JSON)")
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='devices', null=True, blank=True, verbose_name="Projeto")
