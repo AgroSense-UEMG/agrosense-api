@@ -2,15 +2,22 @@ from django.shortcuts import render
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, generics
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny 
 from rest_framework.viewsets import ModelViewSet
+from django.contrib.auth import get_user_model 
+
 from .models import Device, Measurement, Project
 from .serializers import (
     DeviceRegistrationSerializer, 
     MeasurementSerializer,
     ProjectSerializer, 
-    DeviceSerializer
+    DeviceSerializer,
+    UserRegistrationSerializer 
 )
+
+
+User = get_user_model()
+
 
 class DeviceRegistrationView(APIView):
     # Garante que apenas usuários com Token válido tenham acesso
@@ -34,6 +41,7 @@ class DeviceRegistrationView(APIView):
         
         # Se o JSON estiver errado, retorna o erro 400
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
 
 class TelemetryIngestionView(generics.CreateAPIView):
     queryset = Measurement.objects.all()
@@ -66,6 +74,7 @@ class TelemetryIngestionView(generics.CreateAPIView):
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+
 class ProjectViewSet(ModelViewSet):
     serializer_class = ProjectSerializer
     permission_classes = [IsAuthenticated]
@@ -85,3 +94,10 @@ class DeviceViewSet(ModelViewSet):
 
     def get_queryset(self):
         return Device.objects.filter(user=self.request.user).order_by("-created_at")
+
+
+class UserRegistrationView(generics.CreateAPIView):
+    queryset = User.objects.all()
+    # AllowAny é fundamental aqui: permite que um usuário sem conta acesse essa rota para criar uma!
+    permission_classes = [AllowAny]
+    serializer_class = UserRegistrationSerializer
