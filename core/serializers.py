@@ -1,5 +1,10 @@
 from rest_framework import serializers
+from django.contrib.auth import get_user_model  
 from .models import Device, Measurement, Project
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from rest_framework.exceptions import AuthenticationFailed
+
+User = get_user_model()
 
 class DeviceRegistrationSerializer(serializers.ModelSerializer):
     class Meta:
@@ -23,7 +28,7 @@ class DeviceRegistrationSerializer(serializers.ModelSerializer):
         return value
 
 class MeasurementSerializer(serializers.ModelSerializer):
-    # Usamos o 'name' para identificar o hardware no JSON enviado
+    # Usa o 'name' para identificar o hardware no JSON enviado
     name = serializers.CharField(write_only=True)
 
     class Meta:
@@ -73,3 +78,59 @@ class DeviceSerializer(serializers.ModelSerializer):
 
         return project
 
+class UserRegistrationSerializer(serializers.ModelSerializer):
+    # write_only=True garante que a senha não vaze nas respostas da API
+    password = serializers.CharField(write_only=True, min_length=6)
+
+    class Meta:
+        model = User
+        fields = ('id', 'first_name', 'last_name', 'email', 'password')
+
+    def create(self, validated_data):
+        # 1. Extraí o e-mail que veio do Front-end
+        email = validated_data['email']
+        
+        # 2. GERA O USERNAME: Pegamos tudo antes do '@'
+        username_gerado = email.split('@')[0]
+        
+        # 3. Passa o username obrigatório para o create_user
+        user = User.objects.create_user(
+            username=username_gerado, 
+            email=email,
+            password=validated_data['password'],
+            first_name=validated_data.get('first_name', ''),
+            last_name=validated_data.get('last_name', '')
+        )
+        return user
+
+class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['email'] = serializers.EmailField()
+        # Remove a obrigatoriedade do 'username' padrão
+        del self.fields['username']
+
+    def validate(self, attrs):
+        email = attrs.get('email')
+        password = attrs.get('password')
+
+        # 1. Busca o usuário no banco pelo e-mail
+        user = User.objects.filter(email=email).first()
+
+        # 2. Se o usuário existir e a senha estiver certa:
+        if user and user.check_password(password):
+            refresh = self.get_token(user)
+            return {
+                'refresh': str(refresh),
+                'access': str(refresh.access_token),
+                'id': user.id,
+                'user': {
+                    'id': user.id,
+                    'email': user.email,
+                    'first_name': user.first_name,
+                    'last_name': user.last_name
+                }
+            }
+
+        # 3. Se errar e-mail ou senha, devolve o Erro 401 (Não Autorizado)
+        raise AuthenticationFailed('E-mail ou senha incorretos.', code='authorization')
