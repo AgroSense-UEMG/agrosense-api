@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from rest_framework import status, generics
 from rest_framework.permissions import IsAuthenticated, AllowAny 
 from rest_framework.viewsets import ModelViewSet
+from rest_framework.decorators import action
 from django.contrib.auth import get_user_model 
 
 from .models import Device, Measurement, Project
@@ -95,6 +96,33 @@ class DeviceViewSet(ModelViewSet):
     def get_queryset(self):
         return Device.objects.filter(user=self.request.user).order_by("-created_at")
 
+    # Endpoint de manifesto
+    @action(detail=True, methods=["get"], url_path="manifest")
+    def manifest(self, request, pk=None):
+        # O self.get_object() busca o dispositivo pelo ID (pk) da URL
+        device = self.get_object()
+        return Response(device.manifest, status=status.HTTP_200_OK)
+    
+    # Endpoint de hiostórico
+    @action(detail=True, methods=["get"], url_path="readings")
+    def readings(self, request, pk=None):
+        device = self.get_object()
+        measurements = device.measurements.all()
+
+        # Captura os filtros 'start_date' e 'end_date' enviados na URL pelo front-end
+        start_date = request.query_params.get('start_date')
+        end_date = request.query_params.get('end_date')
+
+        # Aplica os filtros se eles existirem na requisição
+        if start_date:
+            measurements = measurements.filter(timestamp__gte=start_date)
+        if end_date:
+            measurements = measurements.filter(timestamp__lte=end_date)
+            
+        # Retorna uma lista de dicionários contendo apenas 'timestamp' e o JSON 'data'
+        history_data = measurements.values('timestamp', 'data')
+        
+        return Response(history_data, status=status.HTTP_200_OK)
 
 class UserRegistrationView(generics.CreateAPIView):
     queryset = User.objects.all()
