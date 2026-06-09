@@ -1,3 +1,5 @@
+import uuid
+
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.core.exceptions import ValidationError
@@ -38,6 +40,7 @@ class Project(TimeStampedModel):
     name = models.CharField(max_length=255, verbose_name="Nome do Projeto")
     description = models.TextField(blank=True, null=True, verbose_name="Descrição")
     user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='projects', verbose_name="Responsável")
+    members = models.ManyToManyField(CustomUser, related_name='member_projects', blank=True, verbose_name="Membros")
 
     class Meta:
         # Uso de verbose_name apenas para traduzir os campos principais no painel de administração
@@ -46,6 +49,40 @@ class Project(TimeStampedModel):
 
     def __str__(self):
         return self.name
+
+
+class ProjectInvite(models.Model):
+    STATUS_PENDING = 'pending'
+    STATUS_ACCEPTED = 'accepted'
+    STATUS_DECLINED = 'declined'
+    STATUS_CHOICES = [
+        (STATUS_PENDING, 'Pendente'),
+        (STATUS_ACCEPTED, 'Aceito'),
+        (STATUS_DECLINED, 'Recusado'),
+    ]
+
+    email = models.EmailField(verbose_name="E-mail do Convidado")
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='invites', verbose_name="Projeto")
+    invited_by = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='sent_project_invites', verbose_name="Convidado por")
+    token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False, verbose_name="Token")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING, verbose_name="Status")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Criado em")
+    accepted_at = models.DateTimeField(blank=True, null=True, verbose_name="Aceito em")
+
+    class Meta:
+        verbose_name = "Convite de Projeto"
+        verbose_name_plural = "Convites de Projeto"
+        ordering = ['-created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['project', 'email', 'status'],
+                name='unique_project_invite_by_status',
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.email} - {self.project}"
+
 
 class Device(TimeStampedModel):
     '''
@@ -58,6 +95,7 @@ class Device(TimeStampedModel):
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='devices', null=True, blank=True, verbose_name="Projeto")
     user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='devices', verbose_name="Proprietário")
     is_online = models.BooleanField(default=False, verbose_name="Status Online")
+    last_seen = models.DateTimeField(blank=True, null=True, verbose_name="Visto por último")
 
     class Meta:
         verbose_name = "Dispositivo"
@@ -77,3 +115,6 @@ class Measurement(models.Model):
         verbose_name = "Medição"
         verbose_name_plural = "Medições"
         ordering = ['-timestamp']
+        indexes = [
+            models.Index(fields=['device', '-timestamp'], name='measurement_device_ts_idx'),
+        ]

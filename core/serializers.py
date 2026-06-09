@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model  
-from .models import Device, Measurement, Project
+from .models import Device, Measurement, Project, ProjectInvite
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework.exceptions import AuthenticationFailed
 
@@ -42,10 +42,52 @@ class MeasurementSerializer(serializers.ModelSerializer):
         return value
 
 class ProjectSerializer(serializers.ModelSerializer):
+    members = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
+    is_owner = serializers.SerializerMethodField()
+
     class Meta:
         model = Project
-        fields = ["id", "name", "description", "created_at"]
+        fields = ["id", "name", "description", "members", "is_owner", "created_at"]
         read_only_fields = ["id", "created_at"]
+
+    def get_is_owner(self, obj):
+        request = self.context.get("request")
+        return bool(request and request.user.is_authenticated and obj.user_id == request.user.id)
+
+
+class MeasurementHistorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Measurement
+        fields = ['id', 'timestamp', 'data']
+
+
+class ProjectInviteSerializer(serializers.ModelSerializer):
+    project_name = serializers.CharField(source='project.name', read_only=True)
+    invited_by_email = serializers.EmailField(source='invited_by.email', read_only=True)
+
+    class Meta:
+        model = ProjectInvite
+        fields = [
+            "id",
+            "email",
+            "project",
+            "project_name",
+            "invited_by_email",
+            "token",
+            "status",
+            "created_at",
+            "accepted_at",
+        ]
+        read_only_fields = [
+            "id",
+            "project",
+            "project_name",
+            "invited_by_email",
+            "token",
+            "status",
+            "created_at",
+            "accepted_at",
+        ]
 
 
 class DeviceSerializer(serializers.ModelSerializer):
@@ -57,11 +99,15 @@ class DeviceSerializer(serializers.ModelSerializer):
         write_only=True,
     )
     project = serializers.PrimaryKeyRelatedField(read_only=True)
+    status = serializers.SerializerMethodField()
 
     class Meta:
         model = Device
-        fields = ["id", "name", "project", "project_id", "is_online", "created_at"]
-        read_only_fields = ["id", "project", "is_online", "created_at"]
+        fields = ["id", "name", "project", "project_id", "is_online", "status", "last_seen", "created_at"]
+        read_only_fields = ["id", "project", "is_online", "status", "last_seen", "created_at"]
+
+    def get_status(self, obj):
+        return "online" if obj.is_online else "offline"
 
     def validate_project_id(self, project: Project | None):
         request = self.context.get("request")
@@ -73,7 +119,7 @@ class DeviceSerializer(serializers.ModelSerializer):
         if user is None or not user.is_authenticated:
             raise serializers.ValidationError("Authentication required.")
 
-        if project.user_id != user.id:
+        if project.user_id != user.id and not project.members.filter(id=user.id).exists():
             raise serializers.ValidationError("You cannot link a device to this project.")
 
         return project

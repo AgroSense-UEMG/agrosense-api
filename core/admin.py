@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
-from .models import CustomUser, InstitutionalDomain, Project, Device, Measurement
+from .models import CustomUser, InstitutionalDomain, Project, ProjectInvite, Device, Measurement
 
 # Registra o usuário personalizado usando o padrão do Django (UserAdmin)
 admin.site.register(CustomUser, UserAdmin)
@@ -13,11 +13,19 @@ class ProjectAdmin(admin.ModelAdmin):
     list_display = ('name', 'user')
     # Adiciona uma barra de pesquisa para buscar projetos pelo nome
     search_fields = ('name',)
+    filter_horizontal = ('members',)
+
+@admin.register(ProjectInvite)
+class ProjectInviteAdmin(admin.ModelAdmin):
+    list_display = ('email', 'project', 'invited_by', 'status', 'created_at', 'accepted_at')
+    list_filter = ('status', 'created_at')
+    search_fields = ('email', 'project__name')
+    readonly_fields = ('token', 'created_at', 'accepted_at')
 
 @admin.register(Device)
 class DeviceAdmin(admin.ModelAdmin):
     # Colunas: Nome do aparelho, quem é o dono, a qual projeto pertence e se está online
-    list_display = ('name', 'user', 'project', 'is_online')
+    list_display = ('name', 'user', 'project', 'is_online', 'last_seen')
     # Cria filtros na lateral direita para facilitar a navegação
     list_filter = ('is_online', 'project')
     # Permite pesquisar pelo nome do dispositivo
