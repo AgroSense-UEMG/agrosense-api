@@ -27,7 +27,6 @@ from .serializers import (
     UserRegistrationSerializer 
 )
 
-
 User = get_user_model()
 
 
@@ -44,26 +43,16 @@ class MeasurementHistoryPagination(PageNumberPagination):
 
 
 class DeviceRegistrationView(APIView):
-    # Garante que apenas usuários com Token válido tenham acesso
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        # Transfere os dados que vieram do ESP32 para o tradutor
         serializer = DeviceRegistrationSerializer(data=request.data)
-        
-        # O Django convoca a função 'validate_manifest' do serializers.py
         if serializer.is_valid():
-
-            # Se estiver tudo certo, salva no banco
-            # 'owner=request.user' preenche o dono do dispositivo usando o Token
             serializer.save(user=request.user)
-
             return Response(
                 {"message": "Dispositivo registrado com sucesso!", "name": serializer.data.get('name')}, 
                 status=status.HTTP_201_CREATED
             )
-        
-        # Se o JSON estiver errado, retorna o erro 400
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -73,17 +62,10 @@ class TelemetryIngestionView(generics.CreateAPIView):
     permission_classes = [IsAuthenticated]
 
     def create(self, request, *args, **kwargs):
-        # O Serializer limpa e valida os dados brutos da requisição
         serializer = self.get_serializer(data=request.data)
-        
         if serializer.is_valid():
-            # Coleta os dados que o hardware enviou
             validated_data = serializer.validated_data
-
-            # Extrai o nome para buscar o dispositivo
-            device_name = validated_data.pop('name') # O .pop() remove o 'name' da lista
-            
-            # Busca o objeto Device real no banco para fazer o vínculo (FK)
+            device_name = validated_data.pop('name') 
             device = Device.objects.filter(name=device_name, user=request.user).first()
             
             if not device:
@@ -98,7 +80,6 @@ class TelemetryIngestionView(generics.CreateAPIView):
                 {"status": "success", "message": "Telemetria salva!"}, 
                 status=status.HTTP_201_CREATED
             )
-        
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -110,25 +91,24 @@ class DeviceReadingsView(generics.ListAPIView):
     def _parse_iso_datetime(self, value, field_name, is_end_date=False):
         try:
             parsed = parse_datetime(value)
-
             if parsed is None:
                 parsed_date = parse_date(value)
                 if parsed_date is None:
                     raise ValidationError({field_name: "Formato inválido. Use uma data em formato ISO."})
-
                 parsed = datetime.combine(parsed_date, time.max if is_end_date else time.min)
         except ValueError:
             raise ValidationError({field_name: "Formato inválido. Use uma data em formato ISO."})
 
         if timezone.is_naive(parsed):
             parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
-
         return parsed
 
     def get_queryset(self):
+        # Alterado para buscar por "name" em vez de "id" para não quebrar a correção do Front-end
+        device_name = self.kwargs.get("device_name")
         device = generics.get_object_or_404(
             visible_devices_for(self.request.user),
-            id=self.kwargs.get("id"),
+            name=device_name,
         )
         queryset = Measurement.objects.filter(device=device).order_by("-timestamp")
 
@@ -145,7 +125,8 @@ class DeviceReadingsView(generics.ListAPIView):
                 timestamp__lte=self._parse_iso_datetime(end_date, "end_date", is_end_date=True)
             )
 
-        return queryset
+        # Otimização da Maria Luisa injetada no código atual!
+        return queryset.values('timestamp', 'data')
 
 
 class ProjectViewSet(ModelViewSet):
@@ -249,8 +230,10 @@ class ProjectInviteAcceptView(generics.GenericAPIView):
 class DeviceViewSet(ModelViewSet):
     serializer_class = DeviceSerializer
     permission_classes = [IsAuthenticated]
-
     http_method_names = ["get", "patch", "head", "options"]
+    
+    
+    lookup_field = 'name' 
 
     def get_queryset(self):
         if self.action == "partial_update":
@@ -259,13 +242,12 @@ class DeviceViewSet(ModelViewSet):
         return visible_devices_for(self.request.user).order_by("-created_at")
 
     @action(detail=True, methods=["get"], url_path="manifest")
-    def manifest(self, request, pk=None):
+    def manifest(self, request, name=None):
         device = self.get_object()
-        return Response({"manifest": device.manifest})
+        return Response(device.manifest, status=status.HTTP_200_OK)
 
 
 class UserRegistrationView(generics.CreateAPIView):
     queryset = User.objects.all()
-    # AllowAny é fundamental aqui: permite que um usuário sem conta acesse essa rota para criar uma!
     permission_classes = [AllowAny]
     serializer_class = UserRegistrationSerializer
