@@ -77,3 +77,24 @@ class Measurement(models.Model):
         verbose_name = "Medição"
         verbose_name_plural = "Medições"
         ordering = ['-timestamp']
+
+
+class ProjectMember(models.Model):
+    """Membros convidados para um projeto (Coordenador ou Pesquisador)."""
+    ROLE_CHOICES = [
+        ("Coordenador", "Coordenador"),
+        ("Pesquisador", "Pesquisador"),
+    ]
+
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='members', verbose_name="Projeto")
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='project_memberships', verbose_name="Usuário")
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default="Pesquisador", verbose_name="Papel")
+    joined_at = models.DateTimeField(auto_now_add=True, verbose_name="Convidado em")
+
+    class Meta:
+        verbose_name = "Membro do Projeto"
+        verbose_name_plural = "Membros do Projeto"
+        unique_together = ['project', 'user']
+
+    def __str__(self):
+        return f"{self.user.email} — {self.role} em {self.project.name}"

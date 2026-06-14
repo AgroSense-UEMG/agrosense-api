@@ -7,13 +7,15 @@ from rest_framework.viewsets import ModelViewSet
 from rest_framework.decorators import action
 from django.contrib.auth import get_user_model 
 
-from .models import Device, Measurement, Project
+from .models import Device, Measurement, Project, ProjectMember
 from .serializers import (
     DeviceRegistrationSerializer, 
     MeasurementSerializer,
     ProjectSerializer, 
     DeviceSerializer,
-    UserRegistrationSerializer 
+    UserRegistrationSerializer,
+    MemberSerializer,
+    InviteMemberSerializer,
 )
 
 
@@ -85,6 +87,50 @@ class ProjectViewSet(ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
+
+    # ─── Membros ─────────────────────────────────────────────
+
+    @action(detail=True, methods=["get"], url_path="members")
+    def members(self, request, pk=None):
+        project = self.get_object()
+        members_qs = ProjectMember.objects.filter(project=project).select_related("user")
+        serializer = MemberSerializer(members_qs, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="invite")
+    def invite(self, request, pk=None):
+        project = self.get_object()
+        invite_serializer = InviteMemberSerializer(data=request.data)
+        invite_serializer.is_valid(raise_exception=True)
+        email = invite_serializer.validated_data["email"]
+
+        user = User.objects.filter(email=email).first()
+        if not user:
+            return Response(
+                {"error": "Usuário não encontrado. O convidado precisa ter uma conta na plataforma."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if ProjectMember.objects.filter(project=project, user=user).exists():
+            return Response(
+                {"error": "Este usuário já é membro do projeto."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        member = ProjectMember.objects.create(project=project, user=user, role="Pesquisador")
+        return Response(
+            MemberSerializer(member).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    # ─── Devices do projeto ──────────────────────────────────
+
+    @action(detail=True, methods=["get"], url_path="devices")
+    def project_devices(self, request, pk=None):
+        project = self.get_object()
+        devices = Device.objects.filter(project=project)
+        serializer = DeviceSerializer(devices, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class DeviceViewSet(ModelViewSet):

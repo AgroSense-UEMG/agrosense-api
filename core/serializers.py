@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model  
-from .models import Device, Measurement, Project
+from .models import Device, Measurement, Project, ProjectMember, InstitutionalDomain
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework.exceptions import AuthenticationFailed
 
@@ -134,3 +134,31 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
 
         # 3. Se errar e-mail ou senha, devolve o Erro 401 (Não Autorizado)
         raise AuthenticationFailed('E-mail ou senha incorretos.', code='authorization')
+# ─── Members ────────────────────────────────────────────────────────
+
+class MemberSerializer(serializers.ModelSerializer):
+    name = serializers.SerializerMethodField()
+    email = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProjectMember
+        fields = ['id', 'name', 'email', 'role', 'joined_at']
+
+    def get_name(self, obj):
+        return obj.user.get_full_name() or obj.user.email.split('@')[0]
+
+    def get_email(self, obj):
+        return obj.user.email
+
+
+class InviteMemberSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+    def validate_email(self, value):
+        email = value.lower().strip()
+        domain = email.split('@')[-1]
+        if not InstitutionalDomain.objects.filter(domain=domain).exists():
+            raise serializers.ValidationError(
+                f"Domínio @{domain} não permitido. Use um email institucional."
+            )
+        return email
