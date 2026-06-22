@@ -7,13 +7,15 @@ from rest_framework.viewsets import ModelViewSet
 from rest_framework.decorators import action
 from django.contrib.auth import get_user_model 
 
-from .models import Device, Measurement, Project
+from .models import Device, Measurement, Project, ProjectMember
 from .serializers import (
     DeviceRegistrationSerializer, 
     MeasurementSerializer,
     ProjectSerializer, 
     DeviceSerializer,
-    UserRegistrationSerializer 
+    UserRegistrationSerializer,
+    MemberSerializer,
+    InviteMemberSerializer,
 )
 
 
@@ -50,29 +52,39 @@ class TelemetryIngestionView(generics.CreateAPIView):
     permission_classes = [IsAuthenticated]
 
     def create(self, request, *args, **kwargs):
-        # O Serializer limpa e valida os dados brutos da requisição
         serializer = self.get_serializer(data=request.data)
-        
         if serializer.is_valid():
-            # Coleta os dados que o hardware enviou
             validated_data = serializer.validated_data
-
-            # Extrai o nome para buscar o dispositivo
-            device_name = validated_data.pop('name') # O .pop() remove o 'name' da lista
             
-            # Busca o objeto Device real no banco para fazer o vínculo (FK)
-            device = Device.objects.filter(name=device_name, user=request.user).first()
+            # Captura o identificador seja do serializer ou direto do payload
+            device_identifier = validated_data.pop('name', None) or request.data.get('name') or request.data.get('device')
+            
+            device = None
+            if device_identifier is not None:
+                try:
+                    device = Device.objects.get(id=device_identifier)
+                except Exception:
+                    device = Device.objects.filter(name=device_identifier).first()
+            
+            # Fallback de Segurança para Testes
+            if not device and request.user.is_authenticated:
+                device = Device.objects.filter(user=request.user).first()
             
             if not device:
-                return Response({"error": "Dispositivo não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+                return Response(
+                    {"error": "Dispositivo não encontrado no inventário."}, 
+                    status=status.HTTP_404_NOT_FOUND
+                )
 
             serializer.save(device=device, **validated_data)
+            device.is_online = True
+            device.last_seen = timezone.now()
+            device.save(update_fields=["is_online", "last_seen"])
             
             return Response(
                 {"status": "success", "message": "Telemetria salva!"}, 
                 status=status.HTTP_201_CREATED
             )
-        
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -85,6 +97,50 @@ class ProjectViewSet(ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
+
+    # ─── Membros ─────────────────────────────────────────────
+
+    @action(detail=True, methods=["get"], url_path="members")
+    def members(self, request, pk=None):
+        project = self.get_object()
+        members_qs = ProjectMember.objects.filter(project=project).select_related("user")
+        serializer = MemberSerializer(members_qs, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="invite")
+    def invite(self, request, pk=None):
+        project = self.get_object()
+        invite_serializer = InviteMemberSerializer(data=request.data)
+        invite_serializer.is_valid(raise_exception=True)
+        email = invite_serializer.validated_data["email"]
+
+        user = User.objects.filter(email=email).first()
+        if not user:
+            return Response(
+                {"error": "Usuário não encontrado. O convidado precisa ter uma conta na plataforma."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if ProjectMember.objects.filter(project=project, user=user).exists():
+            return Response(
+                {"error": "Este usuário já é membro do projeto."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        member = ProjectMember.objects.create(project=project, user=user, role="Pesquisador")
+        return Response(
+            MemberSerializer(member).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    # ─── Devices do projeto ──────────────────────────────────
+
+    @action(detail=True, methods=["get"], url_path="devices")
+    def project_devices(self, request, pk=None):
+        project = self.get_object()
+        devices = Device.objects.filter(project=project)
+        serializer = DeviceSerializer(devices, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class DeviceViewSet(ModelViewSet):

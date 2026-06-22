@@ -1,10 +1,11 @@
 from rest_framework import serializers
-from django.contrib.auth import get_user_model  
-from .models import Device, Measurement, Project
+from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework.exceptions import AuthenticationFailed
+from .models import Device, Measurement, Project, ProjectMember
 
 User = get_user_model()
+
 
 class DeviceRegistrationSerializer(serializers.ModelSerializer):
     class Meta:
@@ -60,8 +61,8 @@ class DeviceSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Device
-        fields = ["id", "name", "project", "project_id", "is_online", "created_at"]
-        read_only_fields = ["id", "project", "is_online", "created_at"]
+        fields = ["id", "name", "project", "project_id", "is_online", "last_seen", "created_at"]
+        read_only_fields = ["id", "project", "is_online", "last_seen", "created_at"]
 
     def validate_project_id(self, project: Project | None):
         request = self.context.get("request")
@@ -104,33 +105,52 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         return user
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.fields['email'] = serializers.EmailField()
-        # Remove a obrigatoriedade do 'username' padrão
-        del self.fields['username']
-
     def validate(self, attrs):
-        email = attrs.get('email')
+        username_field = User.USERNAME_FIELD  # Geralmente 'email' na sua configuração
+        
+        # 1. Normalização: O teste pode enviar a chave como 'email' ou 'username'
+        identificador = attrs.get(username_field) or attrs.get('email') or attrs.get('username')
         password = attrs.get('password')
 
-        # 1. Busca o usuário no banco pelo e-mail
-        user = User.objects.filter(email=email).first()
+        # Força a chave correta no dicionário attrs para o DRF não devolver Erro 400 por chave ausente
+        if identificador:
+            attrs[username_field] = identificador
 
-        # 2. Se o usuário existir e a senha estiver certa:
-        if user and user.check_password(password):
-            refresh = self.get_token(user)
-            return {
-                'refresh': str(refresh),
-                'access': str(refresh.access_token),
-                'id': user.id,
-                'user': {
-                    'id': user.id,
-                    'email': user.email,
-                    'first_name': user.first_name,
-                    'last_name': user.last_name
-                }
-            }
+        # 2. Checagem manual de credenciais para garantir o Erro 401 (Unauthorized) no teste de falha
+        if identificador and password:
+            user = User.objects.filter(**{username_field: identificador}).first()
+            if not user or not user.check_password(password):
+                raise AuthenticationFailed('E-mail ou senha incorretos.', code='authorization')
 
+        # 3. Se as credenciais estiverem corretas, gera o token e retorna 200 OK
+        return super().validate(attrs)
         # 3. Se errar e-mail ou senha, devolve o Erro 401 (Não Autorizado)
         raise AuthenticationFailed('E-mail ou senha incorretos.', code='authorization')
+# ─── Members ────────────────────────────────────────────────────────
+
+class MemberSerializer(serializers.ModelSerializer):
+    name = serializers.SerializerMethodField()
+    email = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProjectMember
+        fields = ['id', 'name', 'email', 'role', 'joined_at']
+
+    def get_name(self, obj):
+        return obj.user.get_full_name() or obj.user.email.split('@')[0]
+
+    def get_email(self, obj):
+        return obj.user.email
+
+
+class InviteMemberSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+    def validate_email(self, value):
+        email = value.lower().strip()
+        domain = email.split('@')[-1]
+        if not InstitutionalDomain.objects.filter(domain=domain).exists():
+            raise serializers.ValidationError(
+                f"Domínio @{domain} não permitido. Use um email institucional."
+            )
+        return email
