@@ -20,4 +20,6 @@ urlpatterns = [
     path("register/", UserRegistrationView.as_view(), name="user-register"),
     # ROTAS AUTOMÁTICAS DA INTERFACE WEB
     path("", include(router.urls)),
+    # Adicione esta linha dentro da lista de urlpatterns:
+    path('hw/data/', TelemetryIngestionView.as_view(), name='telemetry-ingestion'),
 ]
